@@ -29,7 +29,7 @@ async def start_web_server():
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    await message.answer("Yo, bro! 👋 Reels, TikTok yoki Shorts linkini ot, tayyorlab beraman 🚀")
+    await message.answer("Yov bro! 👋 Reels, TikTok yoki Shorts linkini jo'nat, tayyorlab beraman 🚀")
 
 @dp.message()
 async def download_video(message: types.Message):
@@ -52,7 +52,7 @@ async def download_video(message: types.Message):
         file_path = await loop.run_in_executor(None, lambda: _download(url, ydl_opts))
 
         video_file = types.FSInputFile(file_path)
-        await message.answer_video(video=video_file, caption="Mana, tayyor! Real Sigma bo'lsang, do'stlaringga ham ulash 🗿⚡️")
+        await message.answer_video(video=video_file, caption="Mana, tayyor! YANA KUTIB QOLAMAN 🗿⚡️")
         
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -60,7 +60,7 @@ async def download_video(message: types.Message):
         await status_msg.delete()
 
     except Exception as e:
-        await status_msg.edit_text("Ayy, nimadir xato ketdi 💀 Video yopiq profildan yoki link noto'g'ri.")
+        await status_msg.edit_text("Ayy, nimadir xato ketdi 💀 Video yopiq profildan yoki link noto'g'ri!")
 
 def _download(url, opts):
     with yt_dlp.YoutubeDL(opts) as ydl:
