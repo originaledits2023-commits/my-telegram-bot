@@ -8,7 +8,7 @@ from aiogram.filters import CommandStart
 logging.basicConfig(level=logging.INFO)
 
 # Tokenni Render muhitidan olish
-BOT_TOKEN = os.environ.get('8872678681:AAEf-_pWphwMCLLc8_4EL-V8Lgj5BgbJysA')
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
