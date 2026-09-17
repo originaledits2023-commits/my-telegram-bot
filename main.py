@@ -12,9 +12,9 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# --- Render portini aldash uchun mini veb-server ---
+# Render portini aldash uchun veb-server
 async def handle(request):
-    return web.Response(text="Bot is running live!")
+    return web.Response(text="Bot is running!")
 
 async def start_web_server():
     app = web.Application()
@@ -24,12 +24,10 @@ async def start_web_server():
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print(f"Web server started on port {port}")
-# ---------------------------------------------------
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    await message.answer("Yov bro! 👋 Reels, TikTok yoki Shorts linkini jo'nat, tayyorlab beraman 🚀")
+    await message.answer("Yov bro! 👋 Reels, TikTok yoki YouTube linkini tashla, tayyorlab beraman 🚀")
 
 @dp.message()
 async def download_video(message: types.Message):
@@ -38,15 +36,14 @@ async def download_video(message: types.Message):
         await message.answer("Bro, bu link emas-ku 💀 To'g'ri link tashla!")
         return
 
-    status_msg = await message.answer("BIROZ KUT, video yuklanyapti... ⏳🔥")
+    status_msg = await message.answer("SABR QIL, video yuklanyapti... ⏳🔥")
 
-ydl_opts = {
-        # Formatni soddalashtiramiz (YouTube audio/video birlashtirishda xato bermasligi uchun)
+    # YouTube va Instagram uchun universal yt-dlp sozlamasi
+    ydl_opts = {
         'format': 'best[ext=mp4]/best',
         'outtmpl': '/tmp/%(id)s.%(ext)s',
         'noplaylist': True,
         'quiet': True,
-        # YouTube blokirovkalarini aylanib o'tish uchun browser signaturasini qo'shamiz
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
@@ -57,7 +54,7 @@ ydl_opts = {
         file_path = await loop.run_in_executor(None, lambda: _download(url, ydl_opts))
 
         video_file = types.FSInputFile(file_path)
-        await message.answer_video(video=video_file, caption="Mana, tayyor! YANA KUTIB QOLAMAN 🗿⚡️")
+        await message.answer_video(video=video_file, caption="Mana, tayyor! 🗿⚡️")
         
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -65,7 +62,7 @@ ydl_opts = {
         await status_msg.delete()
 
     except Exception as e:
-        await status_msg.edit_text("Ayy, nimadir xato ketdi 💀 Video yopiq profildan yoki link noto'g'ri!")
+        await status_msg.edit_text("Ayy, nimadir xato ketdi 💀 Video yopiq profildan yoki havola noto'g'ri.")
 
 def _download(url, opts):
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -73,7 +70,6 @@ def _download(url, opts):
         return ydl.prepare_filename(info)
 
 async def main():
-    # Veb serverni ham, botni ham bir vaqtda yurgizamiz
     await start_web_server()
     print("Bot ishga tushdi...")
     await dp.start_polling(bot)
