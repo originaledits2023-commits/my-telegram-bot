@@ -38,13 +38,18 @@ async def download_video(message: types.Message):
         await message.answer("Bro, bu link emas-ku 💀 To'g'ri link tashla!")
         return
 
-    status_msg = await message.answer("Vibe'ni buzma, video yuklanyapti... ⏳🔥")
+    status_msg = await message.answer("BIROZ KUT, video yuklanyapti... ⏳🔥")
 
-    ydl_opts = {
-        'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]',
+ydl_opts = {
+        # Formatni soddalashtiramiz (YouTube audio/video birlashtirishda xato bermasligi uchun)
+        'format': 'best[ext=mp4]/best',
         'outtmpl': '/tmp/%(id)s.%(ext)s',
         'noplaylist': True,
         'quiet': True,
+        # YouTube blokirovkalarini aylanib o'tish uchun browser signaturasini qo'shamiz
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        }
     }
 
     try:
