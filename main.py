@@ -3,25 +3,73 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
+import yt_dlp
+from aiohttp import web
 
-# Loggingni sozlash
 logging.basicConfig(level=logging.INFO)
 
-# Tokenni Render muhitidan olish
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# --- Render portini aldash uchun mini veb-server ---
+async def handle(request):
+    return web.Response(text="Bot is running live!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"Web server started on port {port}")
+# ---------------------------------------------------
+
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    await message.answer("Salom! Bot Render serverida muvaffaqiyatli ishlayapti.")
+    await message.answer("Yo, bro! 👋 Reels, TikTok yoki Shorts linkini ot, tayyorlab beraman 🚀")
 
 @dp.message()
-async def echo_cmd(message: types.Message):
-    await message.answer(f"Siz yubordingiz: {message.text}")
+async def download_video(message: types.Message):
+    url = message.text.strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        await message.answer("Bro, bu link emas-ku 💀 To'g'ri link tashla!")
+        return
+
+    status_msg = await message.answer("Vibe'ni buzma, video yuklanyapti... ⏳🔥")
+
+    ydl_opts = {
+        'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]',
+        'outtmpl': '/tmp/%(id)s.%(ext)s',
+        'noplaylist': True,
+        'quiet': True,
+    }
+
+    try:
+        loop = asyncio.get_event_loop()
+        file_path = await loop.run_in_executor(None, lambda: _download(url, ydl_opts))
+
+        video_file = types.FSInputFile(file_path)
+        await message.answer_video(video=video_file, caption="Mana, tayyor! Real Sigma bo'lsang, do'stlaringga ham ulash 🗿⚡️")
+        
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            
+        await status_msg.delete()
+
+    except Exception as e:
+        await status_msg.edit_text("Ayy, nimadir xato ketdi 💀 Video yopiq profildan yoki link noto'g'ri.")
+
+def _download(url, opts):
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        return ydl.prepare_filename(info)
 
 async def main():
+    # Veb serverni ham, botni ham bir vaqtda yurgizamiz
+    await start_web_server()
     print("Bot ishga tushdi...")
     await dp.start_polling(bot)
 
