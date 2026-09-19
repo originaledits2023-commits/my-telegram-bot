@@ -27,7 +27,7 @@ async def start_web_server():
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    await message.answer("Yov bro! 👋 Reels, TikTok yoki YouTube linkini tashla, tayyorlab beraman 🚀")
+    await message.answer("Yo, bro! 👋 Reels, TikTok yoki YouTube linkini tashla, tayyorlab beraman 🚀")
 
 @dp.message()
 async def download_video(message: types.Message):
@@ -36,21 +36,23 @@ async def download_video(message: types.Message):
         await message.answer("Bro, bu link emas-ku 💀 To'g'ri link tashla!")
         return
 
-    status_msg = await message.answer("SABR QIL, video yuklanyapti... ⏳🔥")
+    status_msg = await message.answer("SABRRR, video yuklanyapti... ⏳🔥")
 
-    # YouTube va Instagram uchun universal yt-dlp sozlamasi
-ydl_opts = {
-    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-    'outtmpl': 'downloads/%(title)s.%(ext)s',
-    # YouTube bloki va bot tekshiruvini aylanib o'tish uchun:
-    'extractor_args': {
-        'youtube': {
-            'player_client': ['android', 'ios']  # Brauzer emas, android/ios mijozi sifatida so'rov yuboradi
+    # YouTube blokirovkasini aylanib o'tish uchun Android/iOS mijozini imitatsiya qilish
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': '/tmp/%(id)s.%(ext)s',
+        'noplaylist': True,
+        'quiet': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios']
+            }
+        },
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
-    },
-    'nocheckcertificate': True,
-    'quiet': True
-}
+    }
 
     try:
         loop = asyncio.get_event_loop()
@@ -65,6 +67,7 @@ ydl_opts = {
         await status_msg.delete()
 
     except Exception as e:
+        logging.error(f"Error downloading: {e}")
         await status_msg.edit_text("Ayy, nimadir xato ketdi 💀 Video yopiq profildan yoki havola noto'g'ri.")
 
 def _download(url, opts):
