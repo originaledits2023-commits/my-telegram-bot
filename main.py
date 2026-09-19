@@ -38,12 +38,12 @@ async def download_video(message: types.Message):
 
     status_msg = await message.answer("SABRRR, video yuklanyapti... ⏳🔥")
 
-    # YouTube blokirovkasini aylanib o'tish uchun Android/iOS mijozini imitatsiya qilish
-    ydl_opts = {
+   ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': '/tmp/%(id)s.%(ext)s',
         'noplaylist': True,
         'quiet': True,
+        'cookiefile': 'cookies.txt',  # Kuki faylini ulash
         'extractor_args': {
             'youtube': {
                 'player_client': ['android', 'ios']
