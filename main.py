@@ -36,9 +36,10 @@ async def download_video(message: types.Message):
         await message.answer("Bro, bu link emas-ku 💀 To'g'ri link tashla!")
         return
 
-    status_msg = await message.answer("SABRRR, video yuklanyapti... ⏳🔥")
+    status_msg = await message.answer("SABR, video yuklanyapti... ⏳🔥")
 
-   ydl_opts = {
+    # YouTube va boshqa platformalar uchun sozlama
+    ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': '/tmp/%(id)s.%(ext)s',
         'noplaylist': True,
