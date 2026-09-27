@@ -20,7 +20,7 @@ OWNER_ID = 8774778304
 # AI modelni sozlash
 genai.configure(api_key=GEMINI_API_KEY)
 # To'g'ri model nomi:
-model = genai.GenerativeModel('gemini-2.0-flash')
+ai model = genai.GenerativeModel('gemini-2.0-flash')
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
