@@ -7,13 +7,19 @@ from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import yt_dlp
 from aiohttp import web
+import google.generativeai as genai
 
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 
-# ⚠️ O'ZINGIZNING TELEGRAM ID'INGIZNI BU YERGA YOZING!
+# ⚠️ GEMINI API KEY VA TELEGRAM ID'INGIZNI SHU YERGA YOZING!
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or "YOUR_GEMINI_API_KEY_HERE"
 OWNER_ID = 8774778304
+
+# AI modelni sozlash
+genai.configure(api_key=GEMINI_API_KEY)
+ai_model = genai.GenerativeModel('gemini-1.5-flash')
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -56,9 +62,9 @@ async def start_cmd(message: types.Message):
     builder.adjust(1)
     
     welcome_text = (
-        f"**{user_name}**, yo, bro! 👋 Video & Music Downloader botga xush kelibsiz! 🚀\n\n"
-        "1️⃣ **Instagram**, **TikTok** yoki boshqa link yuboring — formatini tanlaysiz! 🎬/🎧\n"
-        "2️⃣ **Musiqa nomini** yozing — qo'shiqni topib beraman! 🎶\n\n"
+        f"**{user_name}**, yo, bro! 👋 Men aqlli Media & AI Botman! 🚀\n\n"
+        "1️⃣ **Instagram** / **TikTok** linkini yuboring — yuklab beraman! 🎬/🎧\n"
+        "2️⃣ **Har qanday savol yoki matn** yozing — AI sizga javob beradi! 🤖\n\n"
         "⭐ Bot egasining saralangan to'plamini ko'rish uchun pastdagi tugmani bosing!"
     )
     await message.answer(welcome_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
@@ -75,8 +81,7 @@ async def admin_cmd(message: types.Message):
         f"👑 **{user_name} (Owner Admin Panel)**\n\n"
         "Sevimlilar ro'yxatiga media qo'shish uchun:\n"
         "• **Video qo'shish:** Botga video yuborasiz va izohiga (caption) video nomini yozasiz.\n"
-        "• **Musiqa qo'shish:** Botga audio/mp3 yuborasiz va izohiga musiqa nomini yozasiz.\n\n"
-        "*(Bot o'zi avtomatik sevimlilar bazasiga saqlab oladi)*"
+        "• **Musiqa qo'shish:** Botga audio/mp3 yuborasiz va izohiga musiqa nomini yozasiz."
     )
     await message.answer(admin_text, parse_mode="Markdown")
 
@@ -137,7 +142,7 @@ async def send_fav_songs(callback: types.CallbackQuery):
     for item in favorites["songs"]:
         await callback.message.answer_audio(audio=item["file_id"], caption=f"🎧 {item['title']}")
 
-# --- Oddiy yuklab olish va qidiruv mantig'i ---
+# --- Oddiy yuklab olish va AI savol-javob mantig'i ---
 @dp.message()
 async def process_user_input(message: types.Message):
     user_name = message.from_user.full_name
@@ -145,7 +150,7 @@ async def process_user_input(message: types.Message):
     if not text:
         return
 
-    # 1-HOLAT: Link yuborilganda
+    # 1-HOLAT: Link yuborilganda (Video/Audio yuklash)
     if text.startswith("http://") or text.startswith("https://"):
         user_urls[message.from_user.id] = text
         
@@ -156,37 +161,26 @@ async def process_user_input(message: types.Message):
         
         await message.answer(f"**{user_name}**, tanlang, bro: nimasini yuklab beray? 👇", reply_markup=builder.as_markup(), parse_mode="Markdown")
 
-    # 2-HOLAT: Musiqa nomi yozilganda (SoundCloud va boshqa ochiq platformalardan qidiruv)
+    # 2-HOLAT: Har qanday savol yoki matn yozilganda (AI Javob beradi)
     else:
-        status_msg = await message.answer(f"**{user_name}**, qidiryapman: **{text}**... 🔍🎶", parse_mode="Markdown")
-        
-        # SoundCloud orqali qidirish (server blokirovkalaridan xoli platforma)
-        search_query = f"scsearch1:{text}"
-        
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': '/tmp/%(id)s.%(ext)s',
-            'quiet': True,
-            'noplaylist': True,
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            }
-        }
+        status_msg = await message.answer(f"**{user_name}**, o'ylayapman... 🤖💭", parse_mode="Markdown")
         
         try:
             loop = asyncio.get_event_loop()
-            file_path = await loop.run_in_executor(None, lambda: _download(search_query, ydl_opts))
+            # AI orqali javob olish
+            response = await loop.run_in_executor(
+                None, 
+                lambda: ai_model.generate_content(
+                    f"Foydalanuvchi ismi: {user_name}. Unga o'zbek tilida do'stona, samimiy va aniq javob ber. Savol: {text}"
+                )
+            )
             
-            audio_file = types.FSInputFile(file_path)
-            await message.answer_audio(audio=audio_file, caption=f"**{user_name}**, siz qidirgan trek: **{text}** 🎵⚡️", parse_mode="Markdown")
-            
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            await status_msg.delete()
+            ai_reply = response.text
+            await status_msg.edit_text(f"**{user_name}**, {ai_reply}")
             
         except Exception as e:
-            logging.error(f"Error searching music: {e}")
-            await status_msg.edit_text(f"**{user_name}**, afsuski bu nomdagi musiqa topilmadi :( ", parse_mode="Markdown")
+            logging.error(f"AI Error: {e}")
+            await status_msg.edit_text(f"**{user_name}**, uzr, AI hozir javob bera olmadi 💀 Qaytadan urinib ko'ring.", parse_mode="Markdown")
 
 # --- TUGMALAR UCHUN HANDLERLAR ---
 @dp.callback_query(F.data == "dl_video")
@@ -199,7 +193,7 @@ async def process_dl_video(callback: types.CallbackQuery):
         return
 
     await callback.answer()
-    status_msg = await callback.message.edit_text(f"**{user_name}**, SABR, video yuklanyapti... ⏳🔥", parse_mode="Markdown")
+    status_msg = await callback.message.edit_text(f"**{user_name}**, vibe'ni buzma, video yuklanyapti... ⏳🔥", parse_mode="Markdown")
     
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
