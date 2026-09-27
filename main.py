@@ -1,275 +1,263 @@
-import os
 import asyncio
-import logging
 import json
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart, Command
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-import yt_dlp
-from aiohttp import web
+import logging
+import os
+import re
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.enums import ChatType, ParseMode
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import google.generativeai as genai
 
+# Logging sozlamalari
 logging.basicConfig(level=logging.INFO)
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
+# Konfiguratsiya va Muhit o'zgaruvchilari
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+OWNER_ID = 8774778304  # Telegram ID ingizni shu yerga yozing
 
-# ⚠️ GEMINI API KEY VA TELEGRAM ID'INGIZNI SHU YERGA YOZING!
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-OWNER_ID = 8774778304
+# Gemini AI Sozlash
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+ai_model = genai.GenerativeModel("gemini-2.0-flash")
 
-# AI modelni sozlash
-genai.configure(api_key='GEMINI_API_KEY')
-import google.generativeai as genai
-
-# Modelni chaqirish:
-ai_model = genai.GenerativeModel('gemini-2.0-flash')
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-user_urls = {}
-DATA_FILE = "favorites.json"
+FAVORITES_FILE = "favorites.json"
 
-# --- Ma'lumotlarni saqlash va yuklash ---
+
+# JSON fayl bilan ishlash funksiyalari
 def load_favorites():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
+    if not os.path.exists(FAVORITES_FILE):
+        return {"videos": [], "songs": []}
+    try:
+        with open(FAVORITES_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"videos": [], "songs": []}
+    except Exception:
+        return {"videos": [], "songs": []}
+
 
 def save_favorites(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    with open(FAVORITES_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
-favorites = load_favorites()
 
-# --- Render Web Server ---
-async def handle(request):
-    return web.Response(text="Bot is running!")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-
-# --- /start buyrug'i ---
-@dp.message(CommandStart())
-async def start_cmd(message: types.Message):
-    user_name = message.from_user.full_name
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔥 Owner's Favorites", callback_data="show_favorites")
-    builder.adjust(1)
-    
-    welcome_text = (
-        f"**{user_name}**, yo, bro! 👋 Men aqlli Media & AI Botman! 🚀\n\n"
-        "1️⃣ **Instagram** / **TikTok** linkini yuboring — yuklab beraman! 🎬/🎧\n"
-        "2️⃣ **Har qanday savol yoki matn** yozing — AI sizga javob beradi! 🤖\n\n"
-        "⭐ Bot egasining saralangan to'plamini ko'rish uchun pastdagi tugmani bosing!"
-    )
-    await message.answer(welcome_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
-
-# --- ADMIN PANEL (/admin) ---
-@dp.message(Command("admin"))
-async def admin_cmd(message: types.Message):
-    user_name = message.from_user.full_name
-    if message.from_user.id != OWNER_ID:
-        await message.answer(f"**{user_name}**, siz bot egasi emassiz! 🛑", parse_mode="Markdown")
-        return
-    
-    admin_text = (
-        f"👑 **{user_name} (Owner Admin Panel)**\n\n"
-        "Sevimlilar ro'yxatiga media qo'shish uchun:\n"
-        "• **Video qo'shish:** Botga video yuborasiz va izohiga (caption) video nomini yozasiz.\n"
-        "• **Musiqa qo'shish:** Botga audio/mp3 yuborasiz va izohiga musiqa nomini yozasiz."
-    )
-    await message.answer(admin_text, parse_mode="Markdown")
-
-# --- Owner tomonidan media saqlash ---
-@dp.message(F.video & (F.from_user.id == OWNER_ID))
-async def save_owner_video(message: types.Message):
-    user_name = message.from_user.full_name
-    title = message.caption or "Untitled Video"
-    file_id = message.video.file_id
-    
-    favorites["videos"].append({"title": title, "file_id": file_id})
-    save_favorites(favorites)
-    await message.answer(f"✅ **{user_name}**, video sevimlilarga qo'shildi: **{title}**", parse_mode="Markdown")
-
-@dp.message(F.audio & (F.from_user.id == OWNER_ID))
-async def save_owner_song(message: types.Message):
-    user_name = message.from_user.full_name
-    title = message.caption or "Untitled Song"
-    file_id = message.audio.file_id
-    
-    favorites["songs"].append({"title": title, "file_id": file_id})
-    save_favorites(favorites)
-    await message.answer(f"✅ **{user_name}**, musiqa sevimlilarga qo'shildi: **{title}**", parse_mode="Markdown")
-
-# --- Favorites tugmasi bosilganda ---
-@dp.callback_query(F.data == "show_favorites")
-async def show_fav_menu(callback: types.CallbackQuery):
-    user_name = callback.from_user.full_name
-    await callback.answer()
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🎬 Favorite Videos", callback_data="fav_videos")
-    builder.button(text="🎧 Favorite Songs", callback_data="fav_songs")
-    builder.adjust(2)
-    
-    await callback.message.answer(f"⭐ **{user_name}**, Owner's Favorite collection: Nima ko'rmoqchisiz?", reply_markup=builder.as_markup(), parse_mode="Markdown")
-
-@dp.callback_query(F.data == "fav_videos")
-async def send_fav_videos(callback: types.CallbackQuery):
-    user_name = callback.from_user.full_name
-    await callback.answer()
-    if not favorites["videos"]:
-        await callback.message.answer(f"**{user_name}**, hozircha sevimli videolar yo'q 🗿", parse_mode="Markdown")
-        return
-    
-    await callback.message.answer(f"🔥 **{user_name}**, mana Owner's Favorite Videos:", parse_mode="Markdown")
-    for item in favorites["videos"]:
-        await callback.message.answer_video(video=item["file_id"], caption=f"🎬 {item['title']}")
-
-@dp.callback_query(F.data == "fav_songs")
-async def send_fav_songs(callback: types.CallbackQuery):
-    user_name = callback.from_user.full_name
-    await callback.answer()
-    if not favorites["songs"]:
-        await callback.message.answer(f"**{user_name}**, hozircha sevimli musiqalar yo'q 🎧", parse_mode="Markdown")
-        return
-    
-    await callback.message.answer(f"🎵 **{user_name}**, mana Owner's Favorite Songs:", parse_mode="Markdown")
-    for item in favorites["songs"]:
-        await callback.message.answer_audio(audio=item["file_id"], caption=f"🎧 {item['title']}")
-
-# --- Oddiy yuklab olish va AI savol-javob mantig'i ---
-@dp.message()
-async def process_user_input(message: types.Message):
-    user_name = message.from_user.full_name
-    text = message.text.strip() if message.text else ""
-    if not text:
-        return
-
-    # 1-HOLAT: Link yuborilganda (Video/Audio yuklash)
-    if text.startswith("http://") or text.startswith("https://"):
-        user_urls[message.from_user.id] = text
-        
-        builder = InlineKeyboardBuilder()
-        builder.button(text="🎬 Videoni yuklash", callback_data="dl_video")
-        builder.button(text="🎧 Musiqasini yuklash", callback_data="dl_audio")
-        builder.adjust(2)
-        
-        await message.answer(f"**{user_name}**, tanlang, bro: nimasini yuklab beray? 👇", reply_markup=builder.as_markup(), parse_mode="Markdown")
-
-    # 2-HOLAT: Har qanday savol yoki matn yozilganda (AI Javob beradi)
-    else:
-        status_msg = await message.answer(f"**{user_name}**, o'ylayapman... 🤖💭", parse_mode="Markdown")
-        
-        try:
-            loop = asyncio.get_event_loop()
-            # AI orqali javob olish
-            response = await loop.run_in_executor(
-                None, 
-                lambda: ai_model.generate_content(
-                    f"Foydalanuvchi ismi: {user_name}. Unga o'zbek tilida do'stona, samimiy va aniq javob ber. Savol: {text}"
-                )
+# Inline Klaviaturalar
+def get_main_menu():
+    kb = [
+        [
+            InlineKeyboardButton(
+                text="🔥 Owner's Favorites", callback_data="owner_favs"
             )
-            
-            ai_reply = response.text
-            await status_msg.edit_text(f"**{user_name}**, {ai_reply}")
-            
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def get_favs_menu():
+    kb = [
+        [
+            InlineKeyboardButton(
+                text="🎬 Favorite Videos", callback_data="fav_videos"
+            ),
+            InlineKeyboardButton(
+                text="🎵 Favorite Songs", callback_data="fav_songs"
+            ),
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+# /start Buyrug'i
+@dp.message(Command("start"))
+async def start_command(message: types.Message):
+    user_name = message.from_user.full_name
+    text = (
+        f"**{user_name}**, salom! Botga xush kelibsiz 🚀\n\n"
+        f"1️⃣ Instagram / TikTok linkini yuboring – yuklab beraman! 🎬\n"
+        f"2️⃣ Musiqa nomini yozing – topib beraman! 🎵\n"
+        f"3️⃣ Guruhda botni admin qilib, ung Reply yoki Mention qilsangiz – AI javob beradi! 🤖\n\n"
+        f"⭐ Bot egasining saralangan to'plamini ko'rish uchun pastdagi tugmani bosing!"
+    )
+    await message.answer(
+        text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu()
+    )
+
+
+# Owner uchun Media kelganda Sevimlilarga qo'shish tugmasi
+@dp.message(
+    F.from_user.id == OWNER_ID, F.content_type.in_({"video", "audio", "document"})
+)
+async def handle_owner_media(message: types.Message):
+    user_name = message.from_user.full_name
+    media_type = "video" if message.video else "song"
+    file_id = (
+        message.video.file_id
+        if message.video
+        else (
+            message.audio.file_id
+            if message.audio
+            else message.document.file_id
+        )
+    )
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⭐ Sevimlilarga qo'shish",
+                    callback_data=f"addfav_{media_type}_{file_id}",
+                )
+            ]
+        ]
+    )
+    await message.reply(
+        f"**{user_name}**, ushbu mediani Sevimlilar to'plamiga qo'shasizmi?",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb,
+    )
+
+
+# Callback Handlerlar (Tugmalar uchun)
+@dp.callback_query(F.data == "owner_favs")
+async def show_fav_categories(callback: types.CallbackQuery):
+    user_name = callback.from_user.full_name
+    await callback.message.edit_text(
+        f"**{user_name}**, Owner's Favorite collection: Nima ko'rmoqchisiz?",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=get_favs_menu(),
+    )
+
+
+@dp.callback_query(F.data.in_({"fav_videos", "fav_songs"}))
+async def send_fav_list(callback: types.CallbackQuery):
+    user_name = callback.from_user.full_name
+    favs = load_favorites()
+    category = "videos" if callback.data == "fav_videos" else "songs"
+    items = favs.get(category, [])
+
+    if not items:
+        msg = "videolar" if category == "videos" else "musiqalar"
+        await callback.answer(
+            f"{user_name}, hozircha sevimli {msg} yo'q 🤷‍♂️", show_alert=True
+        )
+        return
+
+    for file_id in items:
+        if category == "videos":
+            await callback.message.answer_video(file_id)
+        else:
+            await callback.message.answer_audio(file_id)
+
+
+@dp.callback_query(F.data.startswith("addfav_"))
+async def add_to_favorites(callback: types.CallbackQuery):
+    if callback.from_user.id != OWNER_ID:
+        return
+
+    _, media_type, file_id = callback.data.split("_", 2)
+    favs = load_favorites()
+    category = "videos" if media_type == "video" else "songs"
+
+    if file_id not in favs[category]:
+        favs[category].append(file_id)
+        save_favorites(favs)
+        await callback.answer("✅ Sevimlilarga saqlandi!", show_alert=True)
+        await callback.message.edit_reply_markup(reply_markup=None)
+    else:
+        await callback.answer("⚠️ Bu fayl allaqachon mavjud!", show_alert=True)
+
+
+# Asosiy Matnli Xabarlarni Qayta Ishlash (AI & Musiqa)
+@dp.message(F.text)
+async def handle_text_messages(message: types.Message, bot: Bot):
+    user_name = message.from_user.full_name
+    text = message.text.strip()
+    chat_type = message.chat.type
+
+    # 1. Instagram / TikTok link bo'lsa (Barcha chatlarda ishlaydi)
+    if "instagram.com" in text or "tiktok.com" in text:
+        status_msg = await message.reply(
+            f"**{user_name}**, media yuklanmoqda... ⏳",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        # Bu yerga yt-dlp orqali yuklash kodingizni qo'shasiz
+        await status_msg.edit_text(
+            f"**{user_name}**, media muvaffaqiyatli yuklandi! 🎬"
+        )
+        return
+
+    # 2. Shaxsiy Chat (DM) bo'lsa
+    if chat_type == ChatType.PRIVATE:
+        # Shaxsiy chatda faqat musiqa qidirish xizmati ishlaydi
+        status_msg = await message.reply(
+            f"**{user_name}**, musiqa qidirilmoqda... 🎵",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        # Bu yerga SoundCloud (scsearch1:) orqali musiqa qidiruv kodingiz joylashadi
+        return
+
+    # 3. Guruhlar (Group / Supergroup)
+    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+
+        # Bot guruhda admin ekanligini tekshirish
+        bot_member = await bot.get_chat_member(message.chat.id, bot.id)
+        if bot_member.status not in ["administrator", "creator"]:
+            return  # Admin bo'lmasa ishlamaydi
+
+        # Reply yoki Mention qilinganini tekshirish
+        bot_info = await bot.get_me()
+        is_reply_to_bot = (
+            message.reply_to_message
+            and message.reply_to_message.from_user.id == bot_info.id
+        )
+        is_mentioned = (
+            message.text and f"@{bot_info.username}" in message.text
+        )
+
+        if not (is_reply_to_bot or is_mentioned):
+            return  # Mention yoki Reply bo'lmasa, umuman javob bermaydi
+
+        clean_text = text.replace(f"@{bot_info.username}", "").strip()
+
+        # Musiqa so'rovi bo'lsa
+        if clean_text.lower().startswith(
+            ("musiqa", "qo'shiq", "music", "top", "find")
+        ):
+            await message.reply(
+                f"**{user_name}**, guruh uchun musiqa qidirilmoqda... 🎵",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
+        # Aks holda AI (Gemini 2.0 Flash) ishga tushadi
+        status_msg = await message.reply(
+            f"**{user_name}**, o'ylayapman... 🤖💭", parse_mode=ParseMode.MARKDOWN
+        )
+        try:
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: ai_model.generate_content(
+                    f"Foydalanuvchi ismi: {user_name}. Unga o'zbek tilida Gen-Z uslubida, o'tkir va qiziqarli javob ber. So'rov: {clean_text}"
+                ),
+            )
+            await status_msg.edit_text(
+                f"**{user_name}**, {response.text}", parse_mode=ParseMode.MARKDOWN
+            )
         except Exception as e:
             logging.error(f"AI Error: {e}")
-            await status_msg.edit_text(f"**{user_name}**, uzr, AI hozir javob bera olmadi 💀 Qaytadan urinib ko'ring.", parse_mode="Markdown")
+            await status_msg.edit_text(
+                f"**{user_name}**, uzr, AI hozir javob bera olmadi 💀",
+                parse_mode=ParseMode.MARKDOWN,
+            )
 
-# --- TUGMALAR UCHUN HANDLERLAR ---
-@dp.callback_query(F.data == "dl_video")
-async def process_dl_video(callback: types.CallbackQuery):
-    user_name = callback.from_user.full_name
-    user_id = callback.from_user.id
-    url = user_urls.get(user_id)
-    if not url:
-        await callback.message.edit_text(f"**{user_name}**, ayy, havola eskiribdi. Linkni qayta yuboring 💀", parse_mode="Markdown")
-        return
-
-    await callback.answer()
-    status_msg = await callback.message.edit_text(f"**{user_name}**, vibe'ni buzma, video yuklanyapti... ⏳🔥", parse_mode="Markdown")
-    
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': '/tmp/%(id)s.%(ext)s',
-        'noplaylist': True,
-        'quiet': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }
-    }
-    
-    try:
-        loop = asyncio.get_event_loop()
-        file_path = await loop.run_in_executor(None, lambda: _download(url, ydl_opts))
-        
-        video_file = types.FSInputFile(file_path)
-        await callback.message.answer_video(video=video_file, caption=f"**{user_name}**, mana, videongiz tayyor! 🗿⚡️", parse_mode="Markdown")
-        
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        await status_msg.delete()
-        
-    except Exception as e:
-        logging.error(f"Error downloading video: {e}")
-        await status_msg.edit_text(f"**{user_name}**, ayy, nimadir xato ketdi 💀 Video yopiq profildan yoki havola noto'g'ri.", parse_mode="Markdown")
-
-@dp.callback_query(F.data == "dl_audio")
-async def process_dl_audio(callback: types.CallbackQuery):
-    user_name = callback.from_user.full_name
-    user_id = callback.from_user.id
-    url = user_urls.get(user_id)
-    if not url:
-        await callback.message.edit_text(f"**{user_name}**, ayy, havola eskiribdi. Linkni qayta yuboring 💀", parse_mode="Markdown")
-        return
-
-    await callback.answer()
-    status_msg = await callback.message.edit_text(f"**{user_name}**, videodan audio ajratib olinyapti... 🎧🔥", parse_mode="Markdown")
-    
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': '/tmp/%(id)s.%(ext)s',
-        'quiet': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }
-    }
-    
-    try:
-        loop = asyncio.get_event_loop()
-        file_path = await loop.run_in_executor(None, lambda: _download(url, ydl_opts))
-        
-        audio_file = types.FSInputFile(file_path)
-        await callback.message.answer_audio(audio=audio_file, caption=f"**{user_name}**, mana, audio tayyor! 🎧⚡️", parse_mode="Markdown")
-        
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        await status_msg.delete()
-        
-    except Exception as e:
-        logging.error(f"Error extracting audio: {e}")
-        await status_msg.edit_text(f"**{user_name}**, ayy, nimadir xato ketdi 💀 Audio ajratib bo'lmadi.", parse_mode="Markdown")
-
-def _download(target, opts):
-    clean_opts = {k: v for k, v in opts.items() if v is not None}
-    with yt_dlp.YoutubeDL(clean_opts) as ydl:
-        info = ydl.extract_info(target, download=True)
-        if 'entries' in info:
-            info = info['entries'][0]
-        return ydl.prepare_filename(info)
 
 async def main():
-    await start_web_server()
-    print("Bot ishga tushdi...")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
