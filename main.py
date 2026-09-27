@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 
 # ⚠️ GEMINI API KEY VA TELEGRAM ID'INGIZNI SHU YERGA YOZING!
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY') or "YOUR_GEMINI_API_KEY_HERE"
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 OWNER_ID = 8774778304
 
 # AI modelni sozlash
