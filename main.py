@@ -20,7 +20,7 @@ OWNER_ID = 8774778304  # Telegram ID ingizni shu yerga yozing
 # Gemini AI Sozlash
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-ai_model = genai.GenerativeModel("gemini-2.0-flash")
+ai_model = genai.GenerativeModel('gemini-3.8-flash')
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -255,9 +255,25 @@ async def handle_text_messages(message: types.Message, bot: Bot):
             )
 
 
-async def main():
-    await dp.start_polling(bot)
+import os
+from aiohttp import web
 
+# Render port talab qilgani uchun kichik veb-server
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
+async def main():
+    # Render botni 15 daqiqada o'chirib qo'ymasligi uchun port ochish
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    # Botni ishga tushirish
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
