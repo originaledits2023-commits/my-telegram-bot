@@ -18,10 +18,11 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 OWNER_ID = 8774778304
 
 # AI modelni sozlash
-genai.configure(api_key=GEMINI_API_KEY)
-# To'g'ri model nomi:
-ai model = genai.GenerativeModel('gemini-2.0-flash')
+genai.configure(api_key='GEMINI_API_KEY')
+import google.generativeai as genai
 
+# Modelni chaqirish:
+ai_model = genai.GenerativeModel('gemini-2.0-flash')
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
