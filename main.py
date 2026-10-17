@@ -1,162 +1,208 @@
 import asyncio
+import json
 import logging
-from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import CommandStart
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+import os
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.enums import ChatType, ParseMode
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiohttp import web
 import yt_dlp
 
-# Bot tokeningizni shu yerga yozing yoki environment'dan oling
-TOKEN = "SIZNING_BOT_TOKENINGIZ"
+# Logging sozlamalari
+logging.basicConfig(level=logging.INFO)
 
-router = Router()
-bot = Bot(token=TOKEN)
+# Konfiguratsiya
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+OWNER_ID = 8774778304  # Telegram ID-ingizni shu yerga yozing (masalan: 123456789)
+
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-
-# Foydalanuvchi holatlari (State)
-class DownloadStates(StatesGroup):
-  waiting_for_action = State()
+FAVORITES_FILE = "favorites.json"
 
 
-# 1. Start komandasi
-@router.message(CommandStart())
-async def cmd_start(message: Message):
+# JSON fayl bilan ishlash funksiyalari (Dashboard ma'lumotlari)
+def load_favorites():
+  if not os.path.exists(FAVORITES_FILE):
+    return {"videos": [], "songs": []}
+  try:
+    with open(FAVORITES_FILE, "r", encoding="utf-8") as f:
+      return json.load(f)
+  except Exception:
+    return {"videos": [], "songs": []}
+
+
+def save_favorites(data):
+  with open(FAVORITES_FILE, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False, indent=4)
+
+
+# Klaviaturalar (Menyu)
+def get_main_menu(user_id):
+  kb = [
+    [
+      InlineKeyboardButton(
+        text="🎬 Saralangan Videolar", callback_data="fav_videos"
+      ),
+      InlineKeyboardButton(
+        text="🎵 Saralangan Musiqalar", callback_data="fav_songs"
+      ),
+    ]
+  ]
+  # Faqat bot egasiga Dashboard tugmasi ko'rinadi
+  if user_id == OWNER_ID:
+    kb.append([
+      InlineKeyboardButton(
+        text="⚙️ Owner Dashboard", callback_data="owner_dashboard"
+      )
+    ])
+  return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def get_music_options_keyboard(song_title):
+  # Qo'shiq uchun turli versiyalar (Optionlar)
+  kb = [
+    [
+      InlineKeyboardButton(
+        text="🎧 Normal", callback_data=f"music_norm_{song_title[:20]}"
+      ),
+      InlineKeyboardButton(
+        text="🐢 Slowed + Reverb", callback_data=f"music_slow_{song_title[:20]}"
+      ),
+    ],
+    [
+      InlineKeyboardButton(
+        text="⚡ Sped Up", callback_data=f"music_fast_{song_title[:20]}"
+      ),
+      InlineKeyboardButton(
+        text="📜 Qo'shiq Matni (Lyrics)",
+        callback_data=f"lyrics_{song_title[:20]}",
+      ),
+    ],
+  ]
+  return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+# /start Buyrug'i
+@dp.message(Command("start"))
+async def start_command(message: types.Message):
+  user_name = message.from_user.full_name
+  user_id = message.from_user.id
+
+  text = (
+    f"Salom **{user_name}**! Botga xush kelibsiz 🚀\n\n"
+    f"📌 **Bot imkoniyatlari:**\n"
+    f"1️⃣ Qo'shiq nomi yoki ijrochini yozing – turli versiyalarda (Slowed, Sped Up) va matni bilan topib beraman! 🎵\n"
+    f"2️⃣ Instagram / TikTok havolasini yuboring – videoni yuklab beraman! 🎬\n"
+    f"3️⃣ Bot egasining saralangan to'plamini ko'rish uchun pastdagi tugmalardan foydalaning."
+  )
   await message.answer(
-      "Salom! Menga Instagram, TikTok videosi linkini yoki musiqa"
-      " nomini/linkini yuboring. Men sizga kerakli variantlarni"
-      " taqdim etaman!"
+    text,
+    parse_mode=ParseMode.MARKDOWN,
+    reply_markup=get_main_menu(user_id),
   )
 
 
-# 2. Link yoki matn kelganda ishlovchi qism
-@router.message(F.text)
-async def handle_user_input(message: Message, state: FSMContext):
-  user_text = message.text.strip()
+# --- OWNER DASHBOARD VA MEDIA QO'SHISH ---
 
-  # Link ekanligini yoki shunchaki matn ekanligini aniqlaymiz
-  if (
-      "instagram.com" in user_text
-      or "tiktok.com" in user_text
-      or "http" in user_text
-  ):
-    # Agar link bo'lsa, video uchun tugmalar chiqaramiz
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📥 Videoni yuklab olish",
-                    callback_data=f"dl_video:{user_text}",
-                ),
-                InlineKeyboardButton(
-                    text="🎵 Faqat audiosini olish",
-                    callback_data=f"dl_audio:{user_text}",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="❌ Bekor qilish", callback_data="cancel"
-                )
-            ],
-        ]
-    )
-    await message.answer(
-        "Quyidagi variantlardan birini tanlang:", reply_markup=keyboard
-    )
 
+@dp.callback_query(F.data == "owner_dashboard")
+async def owner_dashboard_handle(callback: types.CallbackQuery):
+  if callback.from_user.id != OWNER_ID:
+    await callback.answer(
+      "Bu bo'lim faqat bot egasi uchun!", show_alert=True
+    )
+    return
+
+  favs = load_favorites()
+  text = (
+    f"⚙️ **Owner Dashboard**\n\n"
+    f"📊 **Statistika:**\n"
+    f"🎥 Bazadagi videolar: {len(favs.get('videos', []))} ta\n"
+    f"🎵 Bazadagi musiqalar: {len(favs.get('songs', []))} ta\n\n"
+    f"💡 *Yangi media qo'shish uchun botga shunchaki Video yoki Audio fayl yuboring!*"
+  )
+  await callback.message.edit_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+# Owner Video yoki Musiqa yuborganda Dashboard'ga saqlash
+@dp.message(
+  F.from_user.id == OWNER_ID, F.content_type.in_({"video", "audio", "document"})
+)
+async def handle_owner_media_upload(message: types.Message):
+  media_type = "video" if message.video else "song"
+  file_id = (
+    message.video.file_id
+    if message.video
+    else (
+      message.audio.file_id
+      if message.audio
+      else message.document.file_id
+    )
+  )
+
+  kb = InlineKeyboardMarkup(
+    inline_keyboard=[[
+      InlineKeyboardButton(
+        text="➕ Bazaga qo'shish",
+        callback_data=f"savefav_{media_type}_{file_id}",
+      )
+    ]]
+  )
+  await message.reply(
+    "👑 **Owner:** Ushbu mediani bazangizga qo'shmoqchimisiz?",
+    parse_mode=ParseMode.MARKDOWN,
+    reply_markup=kb,
+  )
+
+
+@dp.callback_query(F.data.startswith("savefav_"))
+async def save_to_favorites_callback(callback: types.CallbackQuery):
+  if callback.from_user.id != OWNER_ID:
+    return
+
+  _, media_type, file_id = callback.data.split("_", 2)
+  favs = load_favorites()
+  category = "videos" if media_type == "video" else "songs"
+
+  if file_id not in favs[category]:
+    favs[category].append(file_id)
+    save_favorites(favs)
+    await callback.answer(
+      "✅ Dashboard bazasiga saqlandi!", show_alert=True
+    )
+    await callback.message.edit_reply_markup(reply_markup=None)
   else:
-    # Agar musiqa nomi yuborilgan bo'lsa
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🎧 Musiqani topish va yuklash",
-                    callback_data=f"find_music:{user_text}",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="❌ Bekor qilish", callback_data="cancel"
-                )
-            ],
-        ]
-    )
-    await message.answer(
-        f"'{user_text}' bo'yicha musiqa qidiraylikmi?", reply_markup=keyboard
+    await callback.answer(
+      "⚠️ Bu fayl allaqachon bazangizda bor!", show_alert=True
     )
 
 
-# 3. Tugmalar bosilgandagi amallar (Callback Query)
-@router.callback_query(F.data.startswith("dl_video:"))
-async def process_video_download(callback: CallbackQuery):
-  url = callback.data.split(":", 1)[1]
-  await callback.message.edit_text(
-      "⏳ Video yuklab olinmoqda, biroz kuting..."
-  )
+# Saralangan videolarni ko'rish
+@dp.callback_query(F.data.in_({"fav_videos", "fav_songs"}))
+async def send_fav_media(callback: types.CallbackQuery):
+  favs = load_favorites()
+  category = "videos" if callback.data == "fav_videos" else "songs"
+  items = favs.get(category, [])
 
-  try:
-    # yt-dlp yordamida videoni yuklab olish
-    ydl_opts = {
-        "format": "mp4",
-        "outtmpl": "video.mp4",
-        "max_filesize": 50 * 1024 * 1024,  # Telegram limiti uchun 50MB
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-      ydl.download([url])
-
-    # Videoni foydalanuvchiga yuborish
-    from aiogram.types import FSInputFile
-
-    video_file = FSInputFile("video.mp4")
-    await callback.message.answer_video(video_file)
-    await callback.message.delete()
-  except Exception as e:
-    await callback.message.edit_text(
-        f"❌ Xatolik yuz berdi: Videoni yuklab bo'lmadi."
+  if not items:
+    msg = "videolar" if category == "videos" else "musiqalar"
+    await callback.answer(
+      f"Hozircha bazada saralangan {msg} yo'q 🤷‍♂️", show_alert=True
     )
+    return
+
+  await callback.answer("Yuklanmoqda...")
+  for file_id in items:
+    if category == "videos":
+      await callback.message.answer_video(file_id)
+    else:
+      await callback.message.answer_audio(file_id)
 
 
-@router.callback_query(F.data.startswith("dl_audio:"))
-async def process_audio_download(callback: CallbackQuery):
-  url = callback.data.split(":", 1)[1]
-  await callback.message.edit_text("⏳ Audio formatga o'tkazilmoqda...")
-
-  try:
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
-        }],
-        "outtmpl": "audio",
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-      ydl.download([url])
-
-    from aiogram.types import FSInputFile
-
-    audio_file = FSInputFile("audio.mp3")
-    await callback.message.answer_audio(audio_file)
-    await callback.message.delete()
-  except Exception as e:
-    await callback.message.edit_text(
-        f"❌ Xatolik yuz berdi: Audioni yuklab bo'lmadi."
-    )
+# --- MUSIQA QIDIRISH VA MATN/OPTIONLAR ---
 
 
-@router.callback_query(F.data == "cancel")
-async def cancel_process(callback: CallbackQuery):
-  await callback.message.edit_text("Amaliyot bekor qilindi.")
-
-
-async def main():
-  dp.include_router(router)
-  await bot.delete_webhook(drop_pending_updates=True)
-  await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-  logging.basicConfig(level=logging.INFO)
-  asyncio.run(main())
+@dp.message(F.text)
+async def handle_text_requests
