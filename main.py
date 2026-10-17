@@ -210,3 +210,21 @@ async def send_fav_media(callback: types.CallbackQuery):
 async def handle_text_requests(message: types.Message):
     user_name = message.from_user.full_name
     text = message.text.strip()
+# --- RENDER PORT SERVER (Bot o'chib qolmasligi uchun) ---
+
+async def handle_ping(request):
+    return web.Response(text="Bot runs smooth!")
+
+async def main():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
