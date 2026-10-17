@@ -205,4 +205,4 @@ async def send_fav_media(callback: types.CallbackQuery):
 
 
 @dp.message(F.text)
-async def handle_text_requests
+async def handle_text_requests(message: types.Message):
