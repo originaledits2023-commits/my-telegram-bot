@@ -204,5 +204,9 @@ async def send_fav_media(callback: types.CallbackQuery):
 # --- MUSIQA QIDIRISH VA MATN/OPTIONLAR ---
 
 
+# --- MUSIQA QIDIRISH VA MATN/OPTIONLAR ---
+
 @dp.message(F.text)
 async def handle_text_requests(message: types.Message):
+    user_name = message.from_user.full_name
+    text = message.text.strip()
