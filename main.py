@@ -3,12 +3,21 @@ import json
 import logging
 import os
 import re
+
+# 1. Aiogram importlari
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ChatType, ParseMode
 from aiogram.filters import Command
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
+
+# 2. Render veb-serveri
 from aiohttp import web
+
+# 3. Google Gemini AI importi (To'qnashuv oldini olish uchun genai_types)
 from google import genai
+from google.genai import types as genai_types
+
+# 4. Media yuklovchi
 import yt_dlp
 
 logging.basicConfig(level=logging.INFO)
@@ -16,22 +25,25 @@ logging.basicConfig(level=logging.INFO)
 # --- SOZLAMALAR VA ENVIRONMENT VARIABLE'LAR ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-OWNER_ID = 8774778304  # O'zingizning Telegram ID'ingizni yozing
+OWNER_ID = 8774778304  # Bu yerga o'zingizning Telegram ID'ingizni yozing
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Gemini AI Sozlamasi (Loki GOS xarakteri)
+# Gemini AI Sozlamasi
 ai_client = None
 if GEMINI_API_KEY:
   ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
-LOKI_SYSTEM_PROMPT = """
-Sening isming Loki (God of Stories). Sening xaraktering:
-- Juda aqlli, vazmin, o'ychan, bosiq va mag'rur.
-- Hech qachon uzun va valdiragan javob bermaysan. Javoblaring qisqa, lirik va chuqur mantiqqa ega bo'lsin.
-- O'zbek tilida gapirasan.
-- Javoblaring maksimal 2-3 ta jumladan oshmasin.
+# Guruh uchun Loki (God of Stories) AI Prompti
+LOKI_GROUP_PROMPT = """
+Sening isming Loki (God of Stories). 
+Guruh chatidagilar bilan muloqot qilayapsan.
+Qoidalaring:
+1. FAQAT va FAQAT guruhdagi hozirgi kayfiyat (vibe) va tilda javob ber.
+2. Maksimal 1 ta yoki 2 ta qisqa jumla yoz. Qat'iyan uzun matn yozma!
+3. Rasmiy bo'lma, samimiy, dono, biroz piching va hazilga moyil bo'l.
+4. Agar guruhdagilar hazillashayotgan bo'lsa, sen ham hazil bilan moslash.
 """
 
 FAVORITES_FILE = "favorites.json"
@@ -78,7 +90,7 @@ async def start_command(message: types.Message):
       f"• <b>Instagram / TikTok linki</b> – Videoni sifatli yuklab beradi.\n"
       f"• <b>Musiqa nomi yoki ijrochi</b> – Qo'shiqni qidirib yuklab"
       " beradi.\n"
-      f"• <b>Guruhlarda</b> – Bot admin bo'lsa va uning xabariga reply qilinsa,"
+      f"• <b>Guruhlarda</b> – Bot admin bo'lsa va uning xabariga reply qilinganda"
       " <b>Loki (God of Stories)</b> AI javob beradi."
   )
   await message.answer(
@@ -104,30 +116,7 @@ async def owner_dashboard_handle(callback: types.CallbackQuery):
   await callback.message.edit_text(text, parse_mode=ParseMode.HTML)
 
 
-# --- GURUHDA LOKI AI (FAQAT REPLY VA ADMIN BO'LGANDA) ---
-@dp.message(
-    F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}), F.reply_to_message
-)
-async def handle_group_loki_ai(message: types.Message):
-  # Botga reply qilinganini va reply qilingan xabar botniki ekanini tekshirish
-  if message.reply_to_message.from_user.id != bot.id:
-    return
-
-from google.genai import types
-
-from google.genai import types as genai_types
-
-LOKI_GROUP_PROMPT = """
-Sening isming Loki (God of Stories).
-Guruh chatidagilar bilan muloqot qilayapsan.
-Qoidalaring:
-1. FAQAT va FAQAT guruhdagi hozirgi kayfiyat (vibe) va tilda javob ber.
-2. Maksimal 1 ta yoki 2 ta qisqa jumla yoz. Qat'iyan uzun matn yozma!
-3. Rasmiy bo'lma, samimiy, dono, biroz piching va hazilga moyil bo'l.
-4. Agar guruhdagilar hazillashayotgan bo'lsa, sen ham hazil bilan moslash.
-"""
-
-
+# --- GURUHDA LOKI AI (REPLY VA ADMIN BO'LGANDA) ---
 @dp.message(
     F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}), F.reply_to_message
 )
@@ -170,6 +159,7 @@ async def handle_group_loki_ai(message: types.Message):
   except Exception as e:
     logging.error(f"Loki AI Group Error: {e}")
 
+
 # --- INSTAGRAM & TIKTOK VIDEO YUKLASH ---
 async def download_media_video(url: str, message: types.Message):
   status_msg = await message.reply("🎬 Video yuklanmoqda...")
@@ -196,7 +186,7 @@ async def download_media_video(url: str, message: types.Message):
 
       video_file = FSInputFile(filename)
       await message.answer_video(
-          video_file, caption="✨ @downloadwithzerobot orqali yuklab olindi"
+          video_file, caption="✨ Sifatli video yuklab olindi!"
       )
 
       if os.path.exists(filename):
@@ -241,7 +231,10 @@ async def download_music_by_query(query: str, message: types.Message):
 
       audio_file = FSInputFile(filename)
       await message.answer_audio(
-          audio, title=title, performer=performer, caption="🎵 Musiqa tayyor!"
+          audio_file,
+          title=title,
+          performer=performer,
+          caption="🎵 Musiqa tayyor!",
       )
 
       if os.path.exists(filename):
@@ -258,11 +251,9 @@ async def download_music_by_query(query: str, message: types.Message):
 async def handle_private_text(message: types.Message):
   text = message.text.strip()
 
-  # Links (Instagram, TikTok)
   if "instagram.com" in text or "tiktok.com" in text:
     await download_media_video(text, message)
   else:
-    # Qo'shiq qidiruvi
     await download_music_by_query(text, message)
 
 
