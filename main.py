@@ -2,20 +2,37 @@ import asyncio
 import json
 import logging
 import os
+import re
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.enums import ParseMode
+from aiogram.enums import ChatType, ParseMode
 from aiogram.filters import Command
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from aiohttp import web
+from google import genai
 import yt_dlp
 
 logging.basicConfig(level=logging.INFO)
 
+# --- SOZLAMALAR VA ENVIRONMENT VARIABLE'LAR ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 OWNER_ID = 8774778304  # O'zingizning Telegram ID'ingizni yozing
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
+# Gemini AI Sozlamasi (Loki GOS xarakteri)
+ai_client = None
+if GEMINI_API_KEY:
+  ai_client = genai.Client(api_key=GEMINI_API_KEY)
+
+LOKI_SYSTEM_PROMPT = """
+Sening isming Loki (God of Stories). Sening xaraktering:
+- Juda aqlli, vazmin, o'ychan, bosiq va mag'rur.
+- Hech qachon uzun va valdiragan javob bermaysan. Javoblaring qisqa, lirik va chuqur mantiqqa ega bo'lsin.
+- O'zbek tilida gapirasan.
+- Javoblaring maksimal 2-3 ta jumladan oshmasin.
+"""
 
 FAVORITES_FILE = "favorites.json"
 
@@ -35,36 +52,39 @@ def save_favorites(data):
     json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-def get_main_menu(user_id):
-  kb = [[
-      InlineKeyboardButton(
-          text="🎬 Saralangan Videolar", callback_data="fav_videos"
-      ),
-      InlineKeyboardButton(
-          text="🎵 Saralangan Musiqalar", callback_data="fav_songs"
-      ),
-  ]]
-  if user_id == OWNER_ID:
+# --- /START BUYRUG'I ---
+@dp.message(Command("start"), F.chat.type == ChatType.PRIVATE)
+async def start_command(message: types.Message):
+  kb = [
+      [
+          InlineKeyboardButton(
+              text="🎬 Saralangan Videolar", callback_data="fav_videos"
+          ),
+          InlineKeyboardButton(
+              text="🎵 Saralangan Musiqalar", callback_data="fav_songs"
+          ),
+      ]
+  ]
+  if message.from_user.id == OWNER_ID:
     kb.append([
         InlineKeyboardButton(
             text="⚙️ Owner Dashboard", callback_data="owner_dashboard"
         )
     ])
-  return InlineKeyboardMarkup(inline_keyboard=kb)
 
-
-@dp.message(Command("start"))
-async def start_command(message: types.Message):
-  text = (
-      f"Salom **{message.from_user.full_name}**!\n\n"
-      f"🎵 **Qo'shiq nomi** yoki **ijrochini** yozing – musiqasini yuklab"
-      " beraman!\n"
-      f"🎬 Yoki Instagram/TikTok havolasini yuboring."
+  caption = (
+      f"Salom <b>{message.from_user.full_name}</b>! ⚡\n\n"
+      f"📜 <b>Bot imkoniyatlari:</b>\n"
+      f"• <b>Instagram / TikTok linki</b> – Videoni sifatli yuklab beradi.\n"
+      f"• <b>Musiqa nomi yoki ijrochi</b> – Qo'shiqni qidirib yuklab"
+      " beradi.\n"
+      f"• <b>Guruhlarda</b> – Bot admin bo'lsa va uning xabariga reply qilinsa,"
+      " <b>Loki (God of Stories)</b> AI javob beradi."
   )
   await message.answer(
-      text,
-      parse_mode=ParseMode.MARKDOWN,
-      reply_markup=get_main_menu(message.from_user.id),
+      caption,
+      parse_mode=ParseMode.HTML,
+      reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
   )
 
 
@@ -76,86 +96,86 @@ async def owner_dashboard_handle(callback: types.CallbackQuery):
     return
   favs = load_favorites()
   text = (
-      f"⚙️ **Owner Dashboard**\n\n"
+      f"⚙️ <b>Owner Dashboard</b>\n\n"
       f"🎥 Videolar: {len(favs.get('videos', []))} ta\n"
       f"🎵 Musiqalar: {len(favs.get('songs', []))} ta\n\n"
-      f"💡 *Media saqlash uchun botga Video yoki Audio yuboring.*"
+      f"💡 <i>Yangi media qo'shish uchun botga Video yoki Audio yuboring.</i>"
   )
-  await callback.message.edit_text(text, parse_mode=ParseMode.MARKDOWN)
+  await callback.message.edit_text(text, parse_mode=ParseMode.HTML)
 
 
+# --- GURUHDA LOKI AI (FAQAT REPLY VA ADMIN BO'LGANDA) ---
 @dp.message(
-    F.from_user.id == OWNER_ID,
-    F.content_type.in_({"video", "audio", "document"}),
+    F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}), F.reply_to_message
 )
-async def handle_owner_media_upload(message: types.Message):
-  media_type = "video" if message.video else "song"
-  file_id = (
-      message.video.file_id
-      if message.video
-      else (
-          message.audio.file_id
-          if message.audio
-          else message.document.file_id
+async def handle_group_loki_ai(message: types.Message):
+  # Botga reply qilinganini va reply qilingan xabar botniki ekanini tekshirish
+  if message.reply_to_message.from_user.id != bot.id:
+    return
+
+  # Bot guruhda Admin ekanligini tekshirish
+  member = await bot.get_chat_member(message.chat.id, bot.id)
+  if member.status not in ("administrator", "creator"):
+    return
+
+  if not ai_client:
+    return
+
+  try:
+    response = ai_client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=f"{LOKI_SYSTEM_PROMPT}\nFoydalanuvchi: {message.text}\nLoki:",
+    )
+    if response.text:
+      await message.reply(response.text.strip())
+  except Exception as e:
+    logging.error(f"Loki AI error: {e}")
+
+
+# --- INSTAGRAM & TIKTOK VIDEO YUKLASH ---
+async def download_media_video(url: str, message: types.Message):
+  status_msg = await message.reply("🎬 Video yuklanmoqda...")
+
+  ydl_opts = {
+      "format": "bestvideo+bestaudio/best",
+      "outtmpl": "downloads/%(id)s.%(ext)s",
+      "quiet": True,
+      "merge_output_format": "mp4",
+  }
+
+  try:
+    loop = asyncio.get_event_loop()
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+      info = await loop.run_in_executor(
+          None, lambda: ydl.extract_info(url, download=True)
       )
-  )
-  kb = InlineKeyboardMarkup(
-      inline_keyboard=[[
-          InlineKeyboardButton(
-              text="➕ Bazaga qo'shish",
-              callback_data=f"savefav_{media_type}_{file_id}",
-          )
-      ]]
-  )
-  await message.reply(
-      "👑 **Owner:** Ushbu mediani bazangizga qo'shasizmi?",
-      reply_markup=kb,
-  )
+      filename = ydl.prepare_filename(info)
+
+      if not filename.endswith(".mp4") and os.path.exists(
+          filename.rsplit(".", 1)[0] + ".mp4"
+      ):
+        filename = filename.rsplit(".", 1)[0] + ".mp4"
+
+      video_file = FSInputFile(filename)
+      await message.answer_video(
+          video_file, caption="✨ @downloadwithzerobot orqali yuklab olindi"
+      )
+
+      if os.path.exists(filename):
+        os.remove(filename)
+      await status_msg.delete()
+
+  except Exception as e:
+    logging.error(f"Video download error: {e}")
+    await status_msg.edit_text(
+        "❌ Videoni yuklab bo'lmadi. Havola to'g'riligini tekshiring."
+    )
 
 
-@dp.callback_query(F.data.startswith("savefav_"))
-async def save_to_favorites_callback(callback: types.CallbackQuery):
-  if callback.from_user.id != OWNER_ID:
-    return
-  _, media_type, file_id = callback.data.split("_", 2)
-  favs = load_favorites()
-  category = "videos" if media_type == "video" else "songs"
-  if file_id not in favs[category]:
-    favs[category].append(file_id)
-    save_favorites(favs)
-    await callback.answer("✅ Saqlandi!", show_alert=True)
-  else:
-    await callback.answer("⚠️ Allaqachon bor!", show_alert=True)
+# --- MUSIQA QIDIRISH (YT-DLP) ---
+async def download_music_by_query(query: str, message: types.Message):
+  status_msg = await message.reply(f"🔍 <b>{query}</b> qidirilmoqda...")
 
-
-@dp.callback_query(F.data.in_({"fav_videos", "fav_songs"}))
-async def send_fav_media(callback: types.CallbackQuery):
-  favs = load_favorites()
-  category = "videos" if callback.data == "fav_videos" else "songs"
-  items = favs.get(category, [])
-
-  if not items:
-    await callback.answer("Bazada ma'lumot yo'q 🤷‍♂️", show_alert=True)
-    return
-
-  await callback.answer("Yuklanmoqda...")
-  for file_id in items:
-    if category == "videos":
-      await callback.message.answer_video(file_id)
-    else:
-      await callback.message.answer_audio(file_id)
-
-
-# --- MUSIQA QIDIRISH VA YUKLASH (YT-DLP) ---
-@dp.message(F.text)
-async def handle_text_requests(message: types.Message):
-  query = message.text.strip()
-  status_msg = await message.reply(
-      f"🔍 **{query}** bo'yicha musiqa qidirilmoqda...",
-      parse_mode=ParseMode.MARKDOWN,
-  )
-
-  # yt-dlp yordamida audio qidirish va yuklab olish
   ydl_opts = {
       "format": "bestaudio/best",
       "outtmpl": "downloads/%(id)s.%(ext)s",
@@ -174,34 +194,43 @@ async def handle_text_requests(message: types.Message):
       info = await loop.run_in_executor(
           None, lambda: ydl.extract_info(query, download=True)
       )
-
       if "entries" in info:
         info = info["entries"][0]
 
       filename = f"downloads/{info['id']}.mp3"
       title = info.get("title", query)
-
-      await status_msg.edit_text("📤 Musiqa yuborilmoqda...")
+      performer = info.get("uploader", "Unknown Artist")
 
       audio_file = FSInputFile(filename)
-      await message.answer_audio(audio_file, caption=f"🎵 **{title}**")
+      await message.answer_audio(
+          audio, title=title, performer=performer, caption="🎵 Musiqa tayyor!"
+      )
 
-      # Yuklangan vaqtinchalik faylni o'chirish
       if os.path.exists(filename):
         os.remove(filename)
       await status_msg.delete()
 
   except Exception as e:
-    logging.error(f"Download error: {e}")
-    await status_msg.edit_text(
-        "❌ Musiqani yuklashda xatolik yuz berdi. Boshqa nom bilan qayta harakat"
-        " qiling."
-    )
+    logging.error(f"Music download error: {e}")
+    await status_msg.edit_text("❌ Musiqa topilmadi.")
 
 
-# --- RENDER PORT DUMMY SERVER ---
+# --- SHAXSIY CHATDA MATN VA LINKLARNI QABUL QILISH ---
+@dp.message(F.chat.type == ChatType.PRIVATE, F.text)
+async def handle_private_text(message: types.Message):
+  text = message.text.strip()
+
+  # Links (Instagram, TikTok)
+  if "instagram.com" in text or "tiktok.com" in text:
+    await download_media_video(text, message)
+  else:
+    # Qo'shiq qidiruvi
+    await download_music_by_query(text, message)
+
+
+# --- DUMMY WEB SERVER (RENDER 24/7 UYGO'Q TURISHI UCHUN) ---
 async def handle_ping(request):
-  return web.Response(text="Bot is live!")
+  return web.Response(text="Loki Bot is alive & watching!")
 
 
 async def main():
