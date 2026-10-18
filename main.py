@@ -113,7 +113,28 @@ async def handle_group_loki_ai(message: types.Message):
   if message.reply_to_message.from_user.id != bot.id:
     return
 
-  # Bot guruhda Admin ekanligini tekshirish
+from google.genai import types
+
+# Guruh uchun maxsus moslashuvchan System Prompt
+LOKI_GROUP_PROMPT = """
+Sening isming Loki (God of Stories).
+Guruh chatidagilar bilan muloqot qilayapsan.
+Qoidalaring:
+1. FAQAT va FAQAT guruhdagi hozirgi kayfiyat (vibe) va tilda javob ber.
+2. Maksimal 1 ta yoki 2 ta qisqa jumla yoz. Qat'iyan uzun matn yozma!
+3. Rasmiy bo'lma, samimiy, dono, biroz piching va hazilga moyil bo'l.
+4. Agar guruhdagilar hazillashayotgan bo'lsa, sen ham hazil bilan moslash.
+"""
+
+
+@dp.message(
+    F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}), F.reply_to_message
+)
+async def handle_group_loki_ai(message: types.Message):
+  # Botning o'ziga reply qilinganini va bot guruhda admin ekanligini tekshirish
+  if message.reply_to_message.from_user.id != bot.id:
+    return
+
   member = await bot.get_chat_member(message.chat.id, bot.id)
   if member.status not in ("administrator", "creator"):
     return
@@ -121,15 +142,36 @@ async def handle_group_loki_ai(message: types.Message):
   if not ai_client:
     return
 
+  # Yozilayotganini ko'rsatish (Typing status)
+  await bot.send_chat_action(message.chat.id, action="typing")
+
+  # Guruhdagi context (Reply qilingan xabar + yangi xabar)
+  context_text = (
+      f"Guruhdagi avvalgi xabar: {message.reply_to_message.text}\n"
+      f"Foydalanuvchi javobi: {message.text}"
+  )
+
   try:
-    response = ai_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=f"{LOKI_SYSTEM_PROMPT}\nFoydalanuvchi: {message.text}\nLoki:",
+    # Generatsiya parametrlarini qat'iy cheklaymiz
+    config = types.GenerateContentConfig(
+        system_instruction=LOKI_GROUP_PROMPT,
+        max_output_tokens=70,  # Uzun yozishga imkon bermaydi
+        temperature=0.8,  # Vibe'ga tez moslashuvchanlik
     )
+
+    loop = asyncio.get_event_loop()
+    response = await loop.run_in_executor(
+        None,
+        lambda: ai_client.models.generate_content(
+            model="gemini-2.5-flash", contents=context_text, config=config
+        ),
+    )
+
     if response.text:
       await message.reply(response.text.strip())
+
   except Exception as e:
-    logging.error(f"Loki AI error: {e}")
+    logging.error(f"Loki AI Group Error: {e}")
 
 
 # --- INSTAGRAM & TIKTOK VIDEO YUKLASH ---
