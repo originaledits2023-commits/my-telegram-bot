@@ -115,7 +115,8 @@ async def handle_group_loki_ai(message: types.Message):
 
 from google.genai import types
 
-# Guruh uchun maxsus moslashuvchan System Prompt
+from google.genai import types as genai_types
+
 LOKI_GROUP_PROMPT = """
 Sening isming Loki (God of Stories).
 Guruh chatidagilar bilan muloqot qilayapsan.
@@ -131,7 +132,6 @@ Qoidalaring:
     F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}), F.reply_to_message
 )
 async def handle_group_loki_ai(message: types.Message):
-  # Botning o'ziga reply qilinganini va bot guruhda admin ekanligini tekshirish
   if message.reply_to_message.from_user.id != bot.id:
     return
 
@@ -142,21 +142,18 @@ async def handle_group_loki_ai(message: types.Message):
   if not ai_client:
     return
 
-  # Yozilayotganini ko'rsatish (Typing status)
   await bot.send_chat_action(message.chat.id, action="typing")
 
-  # Guruhdagi context (Reply qilingan xabar + yangi xabar)
   context_text = (
       f"Guruhdagi avvalgi xabar: {message.reply_to_message.text}\n"
       f"Foydalanuvchi javobi: {message.text}"
   )
 
   try:
-    # Generatsiya parametrlarini qat'iy cheklaymiz
-    config = types.GenerateContentConfig(
+    config = genai_types.GenerateContentConfig(
         system_instruction=LOKI_GROUP_PROMPT,
-        max_output_tokens=70,  # Uzun yozishga imkon bermaydi
-        temperature=0.8,  # Vibe'ga tez moslashuvchanlik
+        max_output_tokens=70,
+        temperature=0.8,
     )
 
     loop = asyncio.get_event_loop()
@@ -172,7 +169,6 @@ async def handle_group_loki_ai(message: types.Message):
 
   except Exception as e:
     logging.error(f"Loki AI Group Error: {e}")
-
 
 # --- INSTAGRAM & TIKTOK VIDEO YUKLASH ---
 async def download_media_video(url: str, message: types.Message):
